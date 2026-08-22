@@ -20,6 +20,7 @@ if [ "$VERSION_ID" != "22.04" ] || [ "$NAME" != "Ubuntu" ]; then
 fi
 
 sudoer=$(echo $SUDO_USER)
+FEMTOFOX_DIR=${FEMTOFOX_DIR:-/workspaces/femtofox}
 
 # Check if 'dialog' is installed, install it if missing
 if ! command -v dialog &> /dev/null; then
@@ -59,7 +60,6 @@ clone_repos() {
 
   #clone_with_retries "https://github.com/LuckfoxTECH/luckfox-pico.git" || return 1
   clone_with_retries "https://github.com/Ruledo/luckfox-pico.git" || return 1
-  clone_with_retries "https://github.com/femtofox/femtofox.git" || return 1
 
   return 0
 }
@@ -91,40 +91,11 @@ build_firmware() {
   ./build.sh firmware
 }
 
-sync_foxbuntu_changes() {
-  SOURCE_DIR=/home/${sudoer}/femtofox/foxbuntu
-  DEST_DIR=/home/${sudoer}/luckfox-pico
-
-  cd "$SOURCE_DIR" || exit
-  git pull
-
-  cd "$SOURCE_DIR" || exit
-  git ls-files > /tmp/source_files.txt
-
-  echo "Merging in Foxbuntu modifications..."
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/sysdrv/ /home/${sudoer}/luckfox-pico/sysdrv/
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/project/ /home/${sudoer}/luckfox-pico/project/
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/output/image/ /home/${sudoer}/luckfox-pico/output/image/
-
-  while read -r file; do
-      src_file="$SOURCE_DIR/$file"
-      dest_file="$DEST_DIR/$file"
-
-      if [ ! -f "$src_file" ] && [ -f "$dest_file" ]; then
-          echo "Deleting $dest_file as it is no longer in the git repository."
-          rm -f "$dest_file"
-      fi
-  done < /tmp/source_files.txt
-
-  rm /tmp/source_files.txt
-
-  echo "Synchronization complete."
-}
-
 build_kernelconfig() {
   echo "Building kernelconfig... Please exit without making any changes unless you know what you are doing."
   echo "Press any key to continue building the kernel..."
   read -n 1 -s -r
+  cp "$FEMTOFOX_DIR/foxbuntu/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig" /home/${sudoer}/luckfox-pico/sysdrv/source/kernel/arch/arm/configs/luckfox_rv1106_linux_defconfig
   cd /home/${sudoer}/luckfox-pico
   ./build.sh kernelconfig
   ./build.sh kernel
@@ -183,7 +154,7 @@ modify_chroot() {
 }
 
 rebuild_chroot() {
-  chroot_script=${CHROOT_SCRIPT:-/home/${sudoer}/femtofox/environment-setup/femtofox.chroot}
+  chroot_script=${CHROOT_SCRIPT:-$FEMTOFOX_DIR/environment-setup/femtofox.chroot}
   if [[ ! -f $chroot_script ]]; then
     echo "Error: Chroot script $chroot_script not found."
     exit 1
@@ -194,10 +165,7 @@ rebuild_chroot() {
   cd /home/${sudoer}/luckfox-pico
   ./build.sh clean rootfs
   cd /home/${sudoer}/
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/sysdrv/ /home/${sudoer}/luckfox-pico/sysdrv/
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/project/ /home/${sudoer}/luckfox-pico/project/
   build_rootfs
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/sysdrv/out/rootfs_uclibc_rv1106/ /home/${sudoer}/luckfox-pico/sysdrv/out/rootfs_uclibc_rv1106/
   build_firmware
   install_rootfs
   build_rootfs
@@ -206,7 +174,7 @@ rebuild_chroot() {
 }
 
 inject_chroot() {
-  chroot_script=${CHROOT_SCRIPT:-/home/${sudoer}/femtofox/environment-setup/femtofox.chroot}
+  chroot_script=${CHROOT_SCRIPT:-$FEMTOFOX_DIR/environment-setup/femtofox.chroot}
   if [[ ! -f $chroot_script ]]; then
     echo "Error: Chroot script $chroot_script not found."
     exit 1
@@ -239,10 +207,9 @@ inject_chroot() {
 update_image() {
   build_env
   echo "Updating repo..."
-  cd /home/${sudoer}/femtofox
+  cd "$FEMTOFOX_DIR"
   git pull
   cd /home/${sudoer}/
-  sync_foxbuntu_changes
   build_kernelconfig
   build_rootfs
   build_firmware
@@ -252,10 +219,8 @@ update_image() {
 full_rebuild() {
   build_env
   build_uboot
-  sync_foxbuntu_changes
   build_kernelconfig
   build_rootfs
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/sysdrv/out/rootfs_uclibc_rv1106/ /home/${sudoer}/luckfox-pico/sysdrv/out/rootfs_uclibc_rv1106/
   build_firmware
   install_rootfs
   build_rootfs
@@ -271,7 +236,7 @@ install_rootfs() {
   cp /home/${sudoer}/luckfox-pico/sysdrv/out/kernel_drv_ko/* /home/${sudoer}/luckfox-pico/sysdrv/out/rootfs_uclibc_rv1106/lib/modules/5.10.160/
   which qemu-arm-static
 
-  chroot_script=${CHROOT_SCRIPT:-/home/${sudoer}/femtofox/environment-setup/femtofox.chroot}
+  chroot_script=${CHROOT_SCRIPT:-$FEMTOFOX_DIR/environment-setup/femtofox.chroot}
   if [[ ! -f $chroot_script ]]; then
     echo "Error: Chroot script $chroot_script not found."
     exit 1
@@ -321,11 +286,9 @@ create_image() {
 
 sdk_install() {
   echo "Installing Foxbuntu SDK Disk Image Builder..."
-  if [ -d /home/${sudoer}/femtofox ]; then
-      echo "WARNING: ~/femtofox exists, this script will DESTROY and recreate it."
-      echo "Press Ctrl+C to cancel, or Enter to continue."
-      read
-      rm -rf /home/${sudoer}//femtofox
+  if [ ! -d "$FEMTOFOX_DIR" ]; then
+      echo "Error: femtofox repository not found at $FEMTOFOX_DIR."
+      return 1
   fi
   if [ -d /home/${sudoer}/luckfox-pico ]; then
       echo "WARNING: ~/luckfox-pico exists, this script will DESTROY and recreate it."
@@ -344,10 +307,8 @@ sdk_install() {
 
   build_env
   build_uboot
-  sync_foxbuntu_changes
   build_kernelconfig
   build_rootfs
-  rsync -aHAXv --progress --keep-dirlinks --itemize-changes /home/${sudoer}/femtofox/foxbuntu/sysdrv/out/rootfs_uclibc_rv1106/ /home/${sudoer}/luckfox-pico/sysdrv/out/rootfs_uclibc_rv1106/
   build_firmware
   install_rootfs
   build_rootfs
@@ -367,7 +328,7 @@ usage() {
   echo "To modify the chroot and build an updated image use the arg 'modify_chroot'."
   echo "To modify the kernel and build an updated image use the arg 'modify_kernel'."
   echo "To specify a custom chroot script use the arg '--chroot-script /full/path/to/custom.chroot'"
-  echo "other args: full_rebuild rebuild_chroot inject_chroot build_env sync_foxbuntu_changes build_kernelconfig install_rootfs build_rootfs build_uboot build_firmware create_image"
+  echo "other args: full_rebuild rebuild_chroot inject_chroot build_env build_kernelconfig install_rootfs build_rootfs build_uboot build_firmware create_image"
   echo "Example:  sudo ~/foxbunto_env_setup.sh sdk_install"
   echo "Example:  sudo ~/foxbunto_env_setup.sh modify_chroot"
   echo "Example:  sudo ~/foxbunto_env_setup.sh --chroot-script /home/user/custom.chroot"
