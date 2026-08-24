@@ -26,39 +26,93 @@ curl https://getmic.ro/r | bash
 pop
 source "$HOME/.profile"
 
-echo "Installing ADB command startup service..."
+echo "Installing startup service..."
 mkdir -p /boot
-cat > /boot/run_adb_command.sh <<'EOF'
+
+cat > /boot/run_command_and_log_output.sh  <<'EOF'
 #!/bin/bash
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-/usr/bin/adb devices > "$script_dir/run_adb_command.stdout.log" 2> "$script_dir/run_adb_command.stderr.log"
-EOF
-chmod 755 /boot/run_adb_command.sh
 
-cat > /etc/systemd/system/run-adb-command.service <<'EOF'
+$script_dir/run_adb_commands.sh > "$script_dir/run_adb_commands.stdout.log" 2> "$script_dir/run_adb_commands.stderr.log"
+EOF
+chmod 755 /boot/run_command_and_log_output.sh 
+
+
+cat > /boot/run_adb_commands.sh <<'EOF'
+#!/bin/bash
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+$script_dir/run_adb_commands.sh > "$script_dir/run_adb_commands.stdout.log" 2> "$script_dir/run_adb_commands.stderr.log"
+root@femtofox:/boot# cat run_adb_commands.s
+cat: run_adb_commands.s: No such file or directory
+root@femtofox:/boot# cat run_adb_commands.sh
+#!/usr/bin/env bash
+
+set -u
+
+echo "Waiting for an authorized Android device..."
+echo "Press Ctrl+C to stop."
+
+while true; do
+    devices_output="$(adb devices 2>&1)"
+
+    echo
+    echo "===== adb devices: $(date '+%Y-%m-%d %H:%M:%S') ====="
+    printf '%s\n' "$devices_output"
+
+    # Select the first device whose state is "device" (authorized).
+    serial="$(printf '%s\n' "$devices_output" |
+        awk '$2 == "device" { print $1; exit }')"
+
+    if [[ -n "$serial" ]]; then
+        echo
+        echo "Authorized device found: $serial"
+        break
+    fi
+
+    sleep 1
+done
+
+echo
+echo "Running commands on device: $serial"
+
+echo
+echo ">>> ls"
+adb -s "$serial" shell pwd
+
+echo
+echo ">>> sh shizuku start script"
+adb -s "$serial" shell '/data/app/~~ElBG6MPo_zCG6V3R4OfsPA==/moe.shizuku.privileged.api-bh-CHNKrv-xy1bfx6SJHmw==/lib/arm64/libshizuku.so'
+
+echo
+echo ">>> Opening Shizuku app"
+adb -s "$serial" shell monkey -p moe.shizuku.privileged.api 1
+
+
+echo
+echo "Done."
+EOF
+chmod 755 /boot/run_adb_commands.sh
+
+
+
+cat > /etc/systemd/system/run-my-script-at-boot.service <<'EOF'
 [Unit]
 Description=Run the ADB command
 After=local-fs.target
 RequiresMountsFor=/boot
 
+[installed]
+WantedBy=multi-user.target
+
 [Service]
 Type=oneshot
 ExecStart=/boot/run_adb_command.sh
 EOF
+systemctl enable run-my-script-at-boot.service
 
-cat > /etc/systemd/system/run-adb-command.timer <<'EOF'
-[Unit]
-Description=Run the ADB command every 30 seconds
-
-[Timer]
-OnBootSec=30s
-OnUnitActiveSec=30s
-Unit=run-adb-command.service
-
-[Install]
-WantedBy=timers.target
-EOF
 
 echo "Downloading ttyd and enabling service..."
 wget -qO- https://api.github.com/repos/tsl0922/ttyd/releases/latest | grep "browser_download_url" | grep "armhf" | cut -d '"' -f 4 | xargs wget -O /opt/ttyd/ttyd
