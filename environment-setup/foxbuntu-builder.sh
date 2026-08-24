@@ -20,7 +20,7 @@ if [ "$VERSION_ID" != "22.04" ] || [ "$NAME" != "Ubuntu" ]; then
 fi
 
 sudoer=$(echo $SUDO_USER)
-FEMTOFOX_DIR=${FEMTOFOX_DIR:-/workspaces/femtofox}
+FEMTOFOX_DIR=${FEMTOFOX_DIR:-/home/ub/femtofox}
 
 # Check if 'dialog' is installed, install it if missing
 if ! command -v dialog &> /dev/null; then
